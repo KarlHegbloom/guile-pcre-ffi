@@ -80,7 +80,7 @@
         (erroffset (make-blob-pointer int))
         (tableptr %null-pointer)
         (pcre (%new-pcre)))
-    ;; FIXME: add exceptional handling
+    ;; FIXME: add exceptions handling
     (pcre-code-set! pcre
                     (%pcre-compile2 reptr options errcodeptr
                                     (pcre-errptr pcre) erroffset tableptr))
