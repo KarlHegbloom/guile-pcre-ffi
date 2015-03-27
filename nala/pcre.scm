@@ -51,15 +51,14 @@
                       (dynamic-func "pcre_get_substring" pcre-ffi)
                       (list '* '* int int '*)))
 
-(define %pcre-free-study
+(define %pcre-free
   (pointer->procedure void
-                      (dynamic-func "pcre_free_study" pcre-ffi)
+                      (dynamic-func "pcre_free" pcre-ffi)
                       (list '*)))
+  
+(define %pcre-free-study (dynamic-func "pcre_free_study" pcre-ffi))
 
-(define %pcre-free-substring
-  (pointer->procedure void
-                      (dynamic-func "pcre_free_substring" pcre-ffi)
-                      (list '*)))
+(define %pcre-free-substring (dynamic-func "pcre_free_substring" pcre-ffi))
 
 (define-record-type pcre
   (fields
@@ -76,14 +75,14 @@
 
 (define* (new-pcre re #:optional (options 0))
   (let ((reptr (string->pointer re))
-        (errcodeptr (make-blob-pointer int))
+        ;;(errcodeptr (make-blob-pointer int))
         (erroffset (make-blob-pointer int))
         (tableptr %null-pointer)
         (pcre (%new-pcre)))
-    ;; FIXME: add exceptions handling
-    (pcre-code-set! pcre
-                    (%pcre-compile2 reptr options errcodeptr
-                                    (pcre-errptr pcre) erroffset tableptr))
+    ;; FIXME: add exception handling
+    (pcre-code-set! pcre (%pcre-compile reptr options (pcre-errptr pcre)
+                                        erroffset tableptr))
+    ;;(set-pointer-finalizer! (pcre-code pcre) %pcre-free)
     pcre))
 
 (define* (pcre-match pcre str #:key (study-options 0) (exec-options 0)
@@ -102,7 +101,7 @@
                                    ovecsize))
     (pcre-ovector-set! pcre ovector)
     (pcre-strptr-set! pcre strptr)
-    (%pcre-free-study extra)
+    (set-pointer-finalizer! extra %pcre-free-study)
     pcre))
 
 (define (pcre-get-substring pcre index)
@@ -112,7 +111,7 @@
         (buf (make-blob-pointer uint64)))
     (%pcre-get-substring strptr ovector matched index buf)
     (let ((ret (pointer->string (dereference-pointer buf))))
-      (%pcre-free-substring (dereference-pointer buf))
+      (set-pointer-finalizer! (dereference-pointer buf) %pcre-free-substring)
       ret)))
 
 (define* (pcre-search pcre str #:key (study-options 0) (exec-options 0)
@@ -122,11 +121,17 @@
   (define len (string-length str))
   (let lp((i 0) (ret '()))
     (cond
-     ((>= i len) (and ret (reverse ret)))
+     ((>= i len) (reverse ret))
      (else
       (pcre-match pcre str #:study-options study-options #:exec-options exec-options #:offset i)
       (if (<= (pcre-matched pcre) 0)
-          (lp len #f)
-          (let ((hit (pcre-get-substring pcre 1))
+          (lp len ret)
+          (let ((hit (trim (pcre-get-substring pcre 1)))
                 (sublen (string-length (pcre-get-substring pcre 0))))
-            (lp (+ i sublen) (cons (trim hit) ret))))))))
+            (if (zero? sublen)
+                (lp len ret)
+                (lp (+ i sublen) (cons hit ret)))))))))
+
+(define (pcre-free pcre)
+  (and (not (null-pointer? (pcre-code pcre)))
+       (%pcre-free (pcre-code pcre))))
